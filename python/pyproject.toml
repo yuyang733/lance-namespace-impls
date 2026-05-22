@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lance-namespace-impls"
-version = "0.3.0"
+version = "0.2.0"
 description = "Third-party catalog implementations for Lance Namespace"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -12,8 +12,7 @@ requires-python = ">=3.10"
 
 dependencies = [
     "pylance>=0.26.0",
-    "lance-namespace>=0.7.2",
-    "lance-namespace-urllib3-client>=0.7.2",
+    "lance-namespace-urllib3-client==0.6.1",
     "pyarrow>=15.0.0",
     "typing-extensions>=4.5.0",
 ]

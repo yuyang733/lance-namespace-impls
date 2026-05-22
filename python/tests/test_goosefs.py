@@ -33,9 +33,7 @@ def mock_goosefs_client():
 def goosefs_namespace(mock_goosefs_client):
     """Create a GooseFSNamespace instance with mocked client."""
     with patch("lance_namespace_impls.goosefs.GOOSEFS_CLIENT_AVAILABLE", True):
-        namespace = GooseFSNamespace(
-            uri="goosefs://localhost:9220", root="/tmp/lance"
-        )
+        namespace = GooseFSNamespace(uri="goosefs://localhost:9220")
         namespace._client = mock_goosefs_client
         return namespace
 
@@ -51,14 +49,12 @@ class TestGooseFSNamespace:
             ) as mock_client:
                 namespace = GooseFSNamespace(
                     uri="goosefs://localhost:9220",
-                    root="/tmp/lance",
                     timeout=60,
                     max_retries=5,
                 )
 
                 assert namespace.host == "localhost"
                 assert namespace.port == 9220
-                assert namespace.root == "/tmp/lance"
                 assert namespace.timeout == 60
                 assert namespace.max_retries == 5
 
@@ -232,29 +228,10 @@ class TestGooseFSNamespace:
         assert response.location == "/tmp/lance/test_table"
         mock_goosefs_client.deregister_table.assert_called_once()
 
-    def test_normalize_identifier(self, goosefs_namespace):
-        """Test identifier normalization for 2-level hierarchy."""
-        assert goosefs_namespace._normalize_identifier(["test_table"]) == (
-            "default",
-            "test_table",
-        )
-
-        assert goosefs_namespace._normalize_identifier(["test_db", "test_table"]) == (
-            "test_db",
-            "test_table",
-        )
-
-        with pytest.raises(ValueError, match="Invalid identifier"):
-            goosefs_namespace._normalize_identifier(["a", "b", "c"])
-
-    def test_get_table_location(self, goosefs_namespace):
-        """Test getting table location."""
-        location = goosefs_namespace._get_table_location("test_db", "test_table")
-        assert location == "/tmp/lance/test_db/test_table"
-
     def test_root_namespace_operations(self, goosefs_namespace, mock_goosefs_client):
-        """Test root namespace operations."""
-        # Describe root namespace
+        """Test calls with an empty id list (whole-server scope)."""
+        # describe_namespace with id=[] is forwarded as-is to the client.
+        # The properties dict returned is whatever the server sends back.
         mock_goosefs_client.describe_namespace.return_value = {
             "location": "/tmp/lance",
             "host": "localhost",
@@ -264,7 +241,7 @@ class TestGooseFSNamespace:
         response = goosefs_namespace.describe_namespace(request)
         assert response.properties["location"] == "/tmp/lance"
 
-        # List tables at root level
+        # list_tables with id=[] is also forwarded as-is.
         mock_goosefs_client.list_tables.return_value = {
             "tables": []
         }
@@ -280,7 +257,6 @@ class TestGooseFSNamespace:
             with patch("lance_namespace_impls.goosefs.GoosefsMetastoreClient"):
                 namespace = GooseFSNamespace(
                     uri="goosefs://localhost:9220",
-                    root="/tmp/lance",
                     timeout=60,
                     max_retries=5,
                 )
@@ -293,7 +269,6 @@ class TestGooseFSNamespace:
 
                 assert restored.host == "localhost"
                 assert restored.port == 9220
-                assert restored.root == "/tmp/lance"
                 assert restored.timeout == 60
                 assert restored.max_retries == 5
 
@@ -347,3 +322,29 @@ class TestGooseFSNamespace:
         request = TableExistsRequest(id=["test_db", "nonexistent"])
         with pytest.raises(TableNotFoundException, match="does not exist"):
             goosefs_namespace.table_exists(request)
+
+    def test_list_table_indices_translates_indices_key(
+        self, goosefs_namespace, mock_goosefs_client
+    ):
+        """`GoosefsMetastoreClient` returns {"indices": [...]} but the Lance
+        model field is `indexes` — the namespace must translate the key."""
+        from lance_namespace_urllib3_client.models import ListTableIndicesRequest
+
+        index_dict = {
+            "index_name": "i1",
+            "index_uuid": "uuid-1",
+            "columns": ["c1"],
+            "status": "ACTIVE",
+        }
+        mock_goosefs_client.list_table_indices.return_value = {
+            "indices": [index_dict],
+            "page_token": "next",
+        }
+
+        request = ListTableIndicesRequest(id=["db", "tbl"])
+        response = goosefs_namespace.list_table_indices(request)
+
+        assert len(response.indexes) == 1
+        assert response.indexes[0].index_name == "i1"
+        assert response.page_token == "next"
+        mock_goosefs_client.list_table_indices.assert_called_once()
